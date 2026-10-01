@@ -80,10 +80,25 @@ async function fetchPage(startUrl) {
 }
 
 // ---------- Extracción sin IA ----------
+const NAMED = {
+  amp: "&", quot: '"', apos: "'", lt: "<", gt: ">", nbsp: " ",
+  ntilde: "ñ", Ntilde: "Ñ", aacute: "á", eacute: "é", iacute: "í", oacute: "ó", uacute: "ú",
+  Aacute: "Á", Eacute: "É", Iacute: "Í", Oacute: "Ó", Uacute: "Ú", uuml: "ü", Uuml: "Ü",
+  agrave: "à", egrave: "è", ccedil: "ç", iexcl: "¡", iquest: "¿", ordm: "º", ordf: "ª",
+  copy: "©", reg: "®", deg: "°", euro: "€", ndash: "–", mdash: "—", hellip: "…",
+  laquo: "«", raquo: "»", lsquo: "‘", rsquo: "’", ldquo: "“", rdquo: "”", times: "×", middot: "·"
+};
 function decodeEntities(s) {
   return String(s)
-    .replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#0?39;/g, "'")
-    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ");
+    .replace(/&#x([0-9a-f]+);/gi, function (m, h) { try { return String.fromCodePoint(parseInt(h, 16)); } catch (e) { return m; } })
+    .replace(/&#(\d+);/g, function (m, d) { try { return String.fromCodePoint(parseInt(d, 10)); } catch (e) { return m; } })
+    .replace(/&([a-zA-Z]+);/g, function (m, n) { return Object.prototype.hasOwnProperty.call(NAMED, n) ? NAMED[n] : m; });
+}
+
+function cleanTitle(t) {
+  return decodeEntities(String(t || ""))
+    .replace(/\s*[-–|]\s*(?:Buy [^-|]*? on |Compra[r]? [^-|]*? en )?Alibaba\.com\s*$/i, "")
+    .replace(/\s+/g, " ").trim();
 }
 
 function metaContent(html, key) {
@@ -390,7 +405,7 @@ async function handler(req, res) {
     fuente: ai ? "ia" : (fb.tiers.length ? "texto" : "estructurado"),
     producto: {
       plataforma: plataforma,
-      titulo: (ai && ai.titulo) || fb.titulo || datos.titulo || "Producto sin título",
+      titulo: cleanTitle((ai && ai.titulo) || fb.titulo || datos.titulo) || "Producto sin título",
       imagen: datos.imagen || null,
       precio_unitario: precio,
       moneda: (fb.tiers.length ? "USD" : ((ai && ai.moneda) || datos.moneda || "USD")).toUpperCase(),
@@ -403,4 +418,4 @@ async function handler(req, res) {
 }
 
 module.exports = handler;
-module.exports._test = { fallbackParse: fallbackParse, extractStructured: extractStructured, parseNum: parseNum, assertPublic: assertPublic, pageText: pageText };
+module.exports._test = { cleanTitle: cleanTitle, decodeEntities: decodeEntities, fallbackParse: fallbackParse, extractStructured: extractStructured, parseNum: parseNum, assertPublic: assertPublic, pageText: pageText };
