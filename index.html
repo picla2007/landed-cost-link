@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="es-AR">
 <head>
@@ -81,6 +80,8 @@
   tr.tot td{border-top:1px solid rgba(238,243,233,.35);padding-top:8px;font-weight:700}
   tr.rec td{opacity:.75;font-style:italic}
   tr.big td{background:var(--teal-2);font-size:1.02rem;font-weight:700;padding:11px 0}
+  tr.big td:first-child{padding-left:22px}
+  tr.big td:last-child{padding-right:22px}
   .foot{padding:12px 22px 18px;font-size:.78rem;opacity:.8}
   .bar{display:none}
   @media(max-width:860px){
@@ -310,6 +311,7 @@ $("fxBtn").addEventListener("click", async () => {
 
 // ---------- Link → producto ----------
 let autoFob = null; // { tiers:[{desde,precio}], base, factor } cuando el FOB sale del link
+let autoPeso = null; // kg por unidad cuando el peso sale del link
 function unitFor(units){
   if (!autoFob) return 0;
   let u = autoFob.tiers.length ? autoFob.tiers[0].precio : autoFob.base;
@@ -317,9 +319,13 @@ function unitFor(units){
   return u * autoFob.factor;
 }
 $("units").addEventListener("input", () => {
-  if (autoFob){ $("fob").value = (unitFor(Math.max(n("units"),1)) * Math.max(n("units"),1)).toFixed(2); calc(); }
+  const u = Math.max(n("units"),1);
+  if (autoFob) $("fob").value = (unitFor(u) * u).toFixed(2);
+  if (autoPeso) $("peso").value = (autoPeso * u).toFixed(1);
+  if (autoFob || autoPeso) calc();
 });
 $("fob").addEventListener("input", () => { autoFob = null; });
+$("peso").addEventListener("input", () => { autoPeso = null; });
 
 async function analizar(conTexto){
   const url = $("lkUrl").value.trim(), msg = $("lkMsg"), btn = $("lkBtn"), btn2 = $("lkTextBtn");
@@ -367,9 +373,13 @@ function aplicar(p){
   info.push("Precio unitario: " + usd(u));
   if (p.pedido_minimo) info.push("Pedido mínimo: " + dec(p.pedido_minimo,0) + " u.");
   if (p.pedido_minimo && units < p.pedido_minimo) info.push("Tus unidades están por debajo del mínimo");
-  if (p.peso_kg_unidad) info.push("Peso informado: " + dec(p.peso_kg_unidad) + " kg por unidad");
+  autoPeso = p.peso_kg_unidad > 0 ? p.peso_kg_unidad : null;
+  if (autoPeso){
+    $("peso").value = (autoPeso * units).toFixed(1);
+    info.push("Peso: " + dec(autoPeso) + " kg por unidad, " + dec(autoPeso * units, 0) + " kg en total");
+  }
   $("prodInfo").textContent = info.join(" · ");
-  msg.textContent = "Listo. El FOB se recalcula si cambiás las unidades. Verificá el precio en la página original.";
+  msg.textContent = "Listo. El FOB" + (autoPeso ? " y el peso se recalculan" : " se recalcula") + " si cambiás las unidades. Verificá el precio en la página original.";
   calc();
 }
 $("lkBtn").addEventListener("click", () => analizar(false));
