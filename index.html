@@ -50,6 +50,9 @@
   .lk .go:disabled{opacity:.6;cursor:wait}
   .lkmsg{font-size:.88rem;color:var(--muted);margin:0 0 14px;min-height:1.2em}
   .lkmsg.err{color:var(--warn)}
+  .paste{display:none;margin:0 0 14px}
+  .paste textarea{width:100%;min-height:96px;padding:10px 12px;font:inherit;font-size:.92rem;background:#fff;border:1px solid var(--line);border-radius:9px;resize:vertical}
+  .paste .go2{margin-top:8px}
   .prod{display:none;gap:12px;align-items:flex-start;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:14px}
   .prod img{width:64px;height:64px;object-fit:cover;border-radius:8px;background:#E3E8DF;flex:none}
   .prod b{display:block;font-size:.95rem;line-height:1.3}
@@ -103,6 +106,11 @@
         <button class="go" id="lkBtn" type="button">Analizar</button>
       </div>
       <p class="lkmsg" id="lkMsg" aria-live="polite">Te completo el precio y el FOB. Después podés corregir lo que quieras.</p>
+      <div class="paste" id="paste">
+        <label for="lkText">En la página del producto: Ctrl+A, Ctrl+C (en el celular, seleccionar todo y copiar) y pegalo acá.</label>
+        <textarea id="lkText" placeholder="Pegá el texto completo de la página…"></textarea>
+        <button class="btn go2" id="lkTextBtn" type="button">Analizar texto</button>
+      </div>
       <div class="prod" id="prod">
         <img id="prodImg" alt="" referrerpolicy="no-referrer">
         <div><b id="prodTit"></b><small id="prodInfo"></small></div>
@@ -312,20 +320,26 @@ $("units").addEventListener("input", () => {
 });
 $("fob").addEventListener("input", () => { autoFob = null; });
 
-async function analizar(){
-  const url = $("lkUrl").value.trim(), msg = $("lkMsg"), btn = $("lkBtn");
+async function analizar(conTexto){
+  const url = $("lkUrl").value.trim(), msg = $("lkMsg"), btn = $("lkBtn"), btn2 = $("lkTextBtn");
+  const texto = conTexto === true ? $("lkText").value.trim() : "";
   msg.className = "lkmsg";
-  if (!/^https?:\/\//i.test(url)){ msg.textContent = "Pegá el link completo, que empiece con https://"; msg.className = "lkmsg err"; return; }
-  btn.disabled = true; msg.textContent = "Leyendo la página…"; $("prod").style.display = "none";
+  if (!texto && !/^https?:\/\//i.test(url)){ msg.textContent = "Pegá el link completo, que empiece con https://"; msg.className = "lkmsg err"; return; }
+  if (conTexto === true && texto.length < 50){ msg.textContent = "Pegá primero el texto de la página."; msg.className = "lkmsg err"; return; }
+  btn.disabled = true; btn2.disabled = true; msg.textContent = texto ? "Analizando el texto…" : "Leyendo la página…"; $("prod").style.display = "none";
   try{
-    const r = await fetch("/api/analyze", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({url})});
+    const r = await fetch("/api/analyze", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({url, texto})});
     const d = await r.json();
-    if (!d.ok){ msg.textContent = d.mensaje || "No pude leer ese link. Cargá el precio a mano."; msg.className = "lkmsg err"; return; }
+    if (!d.ok){
+      msg.textContent = d.mensaje || "No pude leer ese link. Cargá el precio a mano."; msg.className = "lkmsg err";
+      if (d.sugerirTexto) $("paste").style.display = "block";
+      return;
+    }
     aplicar(d.producto);
   } catch(e){
     msg.textContent = "No pude conectar con el servidor. Esta función anda cuando la app está desplegada en Vercel.";
     msg.className = "lkmsg err";
-  } finally { btn.disabled = false; }
+  } finally { btn.disabled = false; btn2.disabled = false; }
 }
 
 function aplicar(p){
@@ -357,11 +371,11 @@ function aplicar(p){
   msg.textContent = "Listo. El FOB se recalcula si cambiás las unidades. Verificá el precio en la página original.";
   calc();
 }
-$("lkBtn").addEventListener("click", analizar);
-$("lkUrl").addEventListener("keydown", e => { if (e.key === "Enter") analizar(); });
+$("lkBtn").addEventListener("click", () => analizar(false));
+$("lkTextBtn").addEventListener("click", () => analizar(true));
+$("lkUrl").addEventListener("keydown", e => { if (e.key === "Enter") analizar(false); });
 
 calc();
 </script>
 </body>
 </html>
-
