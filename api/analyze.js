@@ -47,7 +47,14 @@ async function assertPublic(hostname) {
 }
 
 // ---------- Descarga de la página ----------
-async function fetchPage(startUrl) {
+const USER_AGENTS = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1"
+];
+function pausa(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+async function fetchPage(startUrl, ua) {
   let current = startUrl;
   for (let i = 0; i < 4; i++) {
     const u = new URL(current);
@@ -60,7 +67,7 @@ async function fetchPage(startUrl) {
         redirect: "manual",
         signal: ctrl.signal,
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+          "User-Agent": ua || USER_AGENTS[0],
           "Accept": "text/html,application/xhtml+xml",
           "Accept-Language": "es-AR,es;q=0.9,en;q=0.8"
         }
@@ -80,10 +87,25 @@ async function fetchPage(startUrl) {
 }
 
 // ---------- Extracción sin IA ----------
+const NAMED = {
+  amp: "&", quot: '"', apos: "'", lt: "<", gt: ">", nbsp: " ",
+  ntilde: "ñ", Ntilde: "Ñ", aacute: "á", eacute: "é", iacute: "í", oacute: "ó", uacute: "ú",
+  Aacute: "Á", Eacute: "É", Iacute: "Í", Oacute: "Ó", Uacute: "Ú", uuml: "ü", Uuml: "Ü",
+  agrave: "à", egrave: "è", ccedil: "ç", iexcl: "¡", iquest: "¿", ordm: "º", ordf: "ª",
+  copy: "©", reg: "®", deg: "°", euro: "€", ndash: "–", mdash: "—", hellip: "…",
+  laquo: "«", raquo: "»", lsquo: "‘", rsquo: "’", ldquo: "“", rdquo: "”", times: "×", middot: "·"
+};
 function decodeEntities(s) {
   return String(s)
-    .replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#0?39;/g, "'")
-    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ");
+    .replace(/&#x([0-9a-f]+);/gi, function (m, h) { try { return String.fromCodePoint(parseInt(h, 16)); } catch (e) { return m; } })
+    .replace(/&#(\d+);/g, function (m, d) { try { return String.fromCodePoint(parseInt(d, 10)); } catch (e) { return m; } })
+    .replace(/&([a-zA-Z]+);/g, function (m, n) { return Object.prototype.hasOwnProperty.call(NAMED, n) ? NAMED[n] : m; });
+}
+
+function cleanTitle(t) {
+  return decodeEntities(String(t || ""))
+    .replace(/\s*[-–|]\s*(?:Buy [^-|]*? on |Compra[r]? [^-|]*? en )?Alibaba\.com\s*$/i, "")
+    .replace(/\s+/g, " ").trim();
 }
 
 function metaContent(html, key) {
@@ -333,24 +355,35 @@ async function handler(req, res) {
     try { new URL(url); } catch (e) {
       return res.status(400).json({ ok: false, mensaje: "El link no es válido." });
     }
-    let page;
-    try {
-      page = await fetchPage(url);
-    } catch (e) {
-      page = null;
+    let page = null;
+    let r = { bloqueada: true };
+    let detalle = "sin respuesta";
+    for (let i = 0; i < USER_AGENTS.length; i++) {
+      try {
+        page = await fetchPage(url, USER_AGENTS[i]);
+      } catch (e) {
+        page = null;
+        detalle = "sin respuesta (" + (e && e.name === "AbortError" ? "tiempo agotado" : (e && e.message) || "error") + ")";
+      }
+      if (page && page.status === 404) {
+        return res.status(200).json({ ok: false, mensaje: "Ese link no existe o la publicación fue eliminada." });
+      }
+      if (page) {
+        r = leer(page);
+        detalle = "HTTP " + page.status + ", " + r.texto.length + " caracteres";
+        if (!r.bloqueada) break;
+      }
+      if (i < USER_AGENTS.length - 1) await pausa(600);
     }
-    if (page && page.status === 404) {
-      return res.status(200).json({ ok: false, mensaje: "Ese link no existe o la publicación fue eliminada." });
-    }
-    let r = page ? leer(page) : { bloqueada: true };
     if (r.bloqueada) {
       const via = await fetchViaScraper(url);
-      if (via) { page = via; r = leer(via); }
+      if (via) { page = via; r = leer(via); detalle = "servicio de scraping"; }
     }
     if (r.bloqueada || !page) {
       return res.status(200).json({
         ok: false,
         sugerirTexto: true,
+        detalle: detalle,
         mensaje: "Esta plataforma bloquea la lectura automática. Pegá abajo el texto de la página y lo analizo igual."
       });
     }
@@ -390,7 +423,7 @@ async function handler(req, res) {
     fuente: ai ? "ia" : (fb.tiers.length ? "texto" : "estructurado"),
     producto: {
       plataforma: plataforma,
-      titulo: (ai && ai.titulo) || fb.titulo || datos.titulo || "Producto sin título",
+      titulo: cleanTitle((ai && ai.titulo) || fb.titulo || datos.titulo) || "Producto sin título",
       imagen: datos.imagen || null,
       precio_unitario: precio,
       moneda: (fb.tiers.length ? "USD" : ((ai && ai.moneda) || datos.moneda || "USD")).toUpperCase(),
@@ -403,4 +436,4 @@ async function handler(req, res) {
 }
 
 module.exports = handler;
-module.exports._test = { fallbackParse: fallbackParse, extractStructured: extractStructured, parseNum: parseNum, assertPublic: assertPublic, pageText: pageText };
+module.exports._test = { cleanTitle: cleanTitle, decodeEntities: decodeEntities, fallbackParse: fallbackParse, extractStructured: extractStructured, parseNum: parseNum, assertPublic: assertPublic, pageText: pageText };
