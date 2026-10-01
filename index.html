@@ -82,6 +82,7 @@
   tr.big td{background:var(--teal-2);font-size:1.02rem;font-weight:700;padding:11px 0}
   tr.big td:first-child{padding-left:22px}
   tr.big td:last-child{padding-right:22px}
+  tr.big td:nth-child(2){padding-right:14px}
   .foot{padding:12px 22px 18px;font-size:.78rem;opacity:.8}
   .bar{display:none}
   @media(max-width:860px){
@@ -394,9 +395,4 @@ function aplicar(p){
 }
 $("lkBtn").addEventListener("click", () => analizar(false));
 $("lkTextBtn").addEventListener("click", () => analizar(true));
-$("lkUrl").addEventListener("keydown", e => { if (e.key === "Enter") analizar(false); });
-
-calc();
-</script>
-</body>
-</html>
+$("lkUrl").addEventListener("keydown", e => { if (e.key === "Enter") analizar(fa
