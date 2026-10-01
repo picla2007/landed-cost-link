@@ -440,4 +440,21 @@ async function handler(req, res) {
 
   return res.status(200).json({
     ok: true,
-    fuente: ai ? "ia" : (fb.ti
+    fuente: ai ? "ia" : (fb.tiers.length ? "texto" : "estructurado"),
+    producto: {
+      plataforma: plataforma,
+      titulo: cleanTitle((ai && ai.titulo) || fb.titulo || datos.titulo) || "Producto sin título",
+      imagen: datos.imagen || null,
+      precio_unitario: precio,
+      moneda: (fb.tiers.length ? "USD" : ((ai && ai.moneda) || datos.moneda || "USD")).toUpperCase(),
+      precios_escalonados: tiers,
+      pedido_minimo: ai && ai.pedido_minimo != null ? parseNum(ai.pedido_minimo) : (tiers.length && tiers[0].desde > 1 ? tiers[0].desde : null),
+      categoria: (ai && ai.categoria) || null,
+      peso_kg_unidad: fb.peso != null ? fb.peso : (ai && ai.peso_kg_unidad != null ? parseNum(ai.peso_kg_unidad) : null),
+      aviso: ai ? null : motivoMensaje(respuesta.motivo)
+    }
+  });
+}
+
+module.exports = handler;
+module.exports._test = { cleanTitle: cleanTitle, decodeEntities: decodeEntities, fallbackParse: fallbackParse, extractStructured: extractStructured, parseNum: parseNum, assertPublic: assertPublic, pageText: pageText };
