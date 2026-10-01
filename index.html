@@ -379,7 +379,8 @@ function aplicar(p){
     info.push("Peso: " + dec(autoPeso) + " kg por unidad, " + dec(autoPeso * units, 0) + " kg en total");
   }
   $("prodInfo").textContent = info.join(" · ");
-  msg.textContent = "Listo. El FOB" + (autoPeso ? " y el peso se recalculan" : " se recalcula") + " si cambiás las unidades. Verificá el precio en la página original.";
+  msg.textContent = "Listo. El FOB" + (autoPeso ? " y el peso se recalculan" : " se recalcula") + " si cambiás las unidades. Verificá el precio en la página original." + (p.aviso ? " Ojo: " + p.aviso : "");
+  if (p.aviso) msg.className = "lkmsg err";
   calc();
 }
 $("lkBtn").addEventListener("click", () => analizar(false));
