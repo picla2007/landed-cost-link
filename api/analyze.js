@@ -322,4 +322,85 @@ async function handler(req, res) {
   const pegadoRaw = typeof body.texto === "string" ? body.texto.slice(0, 60000) : "";
   const pegado = pegadoRaw.replace(/\s+/g, " ").trim();
 
-  let datos = { titulo: null, precio: null, moneda: null, imagen: n
+  let datos = { titulo: null, precio: null, moneda: null, imagen: null };
+  let texto = "";
+  let finalUrl = url;
+
+  if (pegado.length >= 50) {
+    // Modo texto pegado: no se descarga nada, no hay bloqueo posible
+    texto = pegado;
+  } else {
+    try { new URL(url); } catch (e) {
+      return res.status(400).json({ ok: false, mensaje: "El link no es válido." });
+    }
+    let page;
+    try {
+      page = await fetchPage(url);
+    } catch (e) {
+      page = null;
+    }
+    if (page && page.status === 404) {
+      return res.status(200).json({ ok: false, mensaje: "Ese link no existe o la publicación fue eliminada." });
+    }
+    let r = page ? leer(page) : { bloqueada: true };
+    if (r.bloqueada) {
+      const via = await fetchViaScraper(url);
+      if (via) { page = via; r = leer(via); }
+    }
+    if (r.bloqueada || !page) {
+      return res.status(200).json({
+        ok: false,
+        sugerirTexto: true,
+        mensaje: "Esta plataforma bloquea la lectura automática. Pegá abajo el texto de la página y lo analizo igual."
+      });
+    }
+    datos = r.datos;
+    texto = r.texto;
+    finalUrl = page.finalUrl;
+  }
+
+  const respuesta = await askClaude(datos, texto, finalUrl || "(texto pegado)");
+  const ai = respuesta.ai;
+  const fb = fallbackParse(pegado.length >= 50 ? pegadoRaw : texto);
+
+  let tiers = ai && Array.isArray(ai.precios_escalonados)
+    ? ai.precios_escalonados
+        .map(function (t) { return { desde: parseNum(t.desde), precio: parseNum(t.precio) }; })
+        .filter(function (t) { return t.desde != null && t.precio != null; })
+        .sort(function (a, b) { return a.desde - b.desde; })
+    : [];
+  // Si el texto trae escalones claros, esos mandan sobre lo que devuelva la IA
+  if (fb.tiers.length) tiers = fb.tiers;
+
+  let precio = tiers.length ? tiers[0].precio : null;
+  if (precio == null) precio = (ai && ai.precio_unitario != null ? parseNum(ai.precio_unitario) : null) || datos.precio;
+  if (precio == null) {
+    return res.status(200).json({
+      ok: false,
+      sugerirTexto: true,
+      mensaje: motivoMensaje(respuesta.motivo)
+    });
+  }
+
+  let plataforma = "texto pegado";
+  try { plataforma = new URL(finalUrl).hostname.replace(/^www\./, ""); } catch (e) { /* sin url */ }
+
+  return res.status(200).json({
+    ok: true,
+    fuente: ai ? "ia" : (fb.tiers.length ? "texto" : "estructurado"),
+    producto: {
+      plataforma: plataforma,
+      titulo: (ai && ai.titulo) || fb.titulo || datos.titulo || "Producto sin título",
+      imagen: datos.imagen || null,
+      precio_unitario: precio,
+      moneda: (fb.tiers.length ? "USD" : ((ai && ai.moneda) || datos.moneda || "USD")).toUpperCase(),
+      precios_escalonados: tiers,
+      pedido_minimo: ai && ai.pedido_minimo != null ? parseNum(ai.pedido_minimo) : (tiers.length && tiers[0].desde > 1 ? tiers[0].desde : null),
+      categoria: (ai && ai.categoria) || null,
+      peso_kg_unidad: fb.peso != null ? fb.peso : (ai && ai.peso_kg_unidad != null ? parseNum(ai.peso_kg_unidad) : null)
+    }
+  });
+}
+
+module.exports = handler;
+module.exports._test = { fallbackParse: fallbackParse, extractStructured: extractStructured, parseNum: parseNum, assertPublic: assertPublic, pageText: pageText };
