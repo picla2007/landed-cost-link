@@ -192,8 +192,23 @@ function pageText(html) {
 }
 
 // ---------- Lectura con IA ----------
+function cleanKey(k) {
+  return String(k || "").trim().replace(/^["\u201C\u2018']+|["\u201D\u2019']+$/g, "").trim();
+}
+
+// Pista segura sobre la clave cargada (sin mostrarla entera)
+function pistaClave() {
+  const raw = String(process.env.ANTHROPIC_API_KEY || "");
+  const k = cleanKey(raw);
+  let extra = "";
+  if (raw !== raw.trim() || /^["'\u201C\u2018]|["'\u201D\u2019]$/.test(raw.trim())) extra += " Tenía espacios o comillas (ya las ignoro).";
+  if (/\s/.test(k)) extra += " Tiene espacios o saltos de línea en el medio: se pegó cortada.";
+  if (k.indexOf("sk-ant-") !== 0) extra += " No empieza con sk-ant-, así que no parece una clave de Anthropic.";
+  return " [Clave cargada: " + k.length + " caracteres, empieza con \"" + k.slice(0, 7) + "\"." + extra + "]";
+}
+
 async function askClaude(datos, texto, url) {
-  const key = process.env.ANTHROPIC_API_KEY;
+  const key = cleanKey(process.env.ANTHROPIC_API_KEY);
   if (!key) return { ai: null, motivo: "sin_clave" };
   const prompt =
     "URL: " + url + "\n" +
@@ -218,7 +233,7 @@ async function askClaude(datos, texto, url) {
       signal: ctrl.signal,
       headers: {
         "content-type": "application/json",
-        "x-api-key": key.trim(),
+        "x-api-key": key,
         "anthropic-version": "2023-06-01"
       },
       body: JSON.stringify({
@@ -277,10 +292,11 @@ function fallbackParse(raw) {
     let stop = lines.findIndex(function (l) { return /^(?:US\s?\$|USD|\$)\s?\d/.test(l); });
     if (stop === -1) stop = lines.length;
     const NO_TITULO = /^(?:no reviews|\d+(?:\.\d+)?\s*\/\s*5|store rating|main markets|response time|on-time|reorder|supplier|custom|minor|drawing|sample|full custom|verified|gold|select|photos|video|next slide|guardar|copiar|generador|id del|buscar|sell on|help center|about alibaba|deliver to|what are you)/i;
+    const NOMBRE_EMPRESA = /\b(?:co\.?,?\s*ltd|limited|trading co|technology co|company|factory|manufacturer|\bllc\b|\binc\.?|\bcorp\b|s\.?a\.?\b)/i;
     for (let i = stop - 1; i >= 0; i--) {
       const l = lines[i];
       if (l.length < 25 || l.length > 220) continue;
-      if (l.indexOf("](") !== -1 || l.indexOf("http") !== -1 || /^[*\d#]/.test(l) || NO_TITULO.test(l)) continue;
+      if (l.indexOf("](") !== -1 || l.indexOf("http") !== -1 || /^[*\d#]/.test(l) || NO_TITULO.test(l) || NOMBRE_EMPRESA.test(l)) continue;
       titulo = l;
       break;
     }
@@ -290,7 +306,7 @@ function fallbackParse(raw) {
 
 function motivoMensaje(m) {
   if (m === "sin_clave") return "Falta la clave de la IA: agregá ANTHROPIC_API_KEY en Vercel (Settings → Environment Variables) y hacé un Redeploy.";
-  if (m === "http_401") return "La clave ANTHROPIC_API_KEY no es válida. Revisá que esté bien copiada, sin espacios ni comillas.";
+  if (m === "http_401") return "La clave ANTHROPIC_API_KEY no es válida. Revisá que esté bien copiada, sin espacios ni comillas, y que hayas hecho un Redeploy después de cambiarla." + pistaClave();
   if (m === "http_404") return "El modelo configurado no existe. Borrá la variable ANALYZE_MODEL en Vercel o poné un modelo válido.";
   if (m === "http_429" || m === "http_529") return "La API de Anthropic está saturada o llegaste al límite. Probá de nuevo en un rato.";
   if (m && m.indexOf("http_") === 0) return "La API de Anthropic respondió con error " + m.slice(5) + ". Revisá la clave y el saldo de tu cuenta.";
@@ -424,21 +440,4 @@ async function handler(req, res) {
 
   return res.status(200).json({
     ok: true,
-    fuente: ai ? "ia" : (fb.tiers.length ? "texto" : "estructurado"),
-    producto: {
-      plataforma: plataforma,
-      titulo: cleanTitle((ai && ai.titulo) || fb.titulo || datos.titulo) || "Producto sin título",
-      imagen: datos.imagen || null,
-      precio_unitario: precio,
-      moneda: (fb.tiers.length ? "USD" : ((ai && ai.moneda) || datos.moneda || "USD")).toUpperCase(),
-      precios_escalonados: tiers,
-      pedido_minimo: ai && ai.pedido_minimo != null ? parseNum(ai.pedido_minimo) : (tiers.length && tiers[0].desde > 1 ? tiers[0].desde : null),
-      categoria: (ai && ai.categoria) || null,
-      peso_kg_unidad: fb.peso != null ? fb.peso : (ai && ai.peso_kg_unidad != null ? parseNum(ai.peso_kg_unidad) : null),
-      aviso: ai ? null : motivoMensaje(respuesta.motivo)
-    }
-  });
-}
-
-module.exports = handler;
-module.exports._test = { cleanTitle: cleanTitle, decodeEntities: decodeEntities, fallbackParse: fallbackParse, extractStructured: extractStructured, parseNum: parseNum, assertPublic: assertPublic, pageText: pageText };
+    fuente: ai ? "ia" : (fb.ti
