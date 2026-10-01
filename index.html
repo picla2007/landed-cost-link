@@ -126,6 +126,7 @@
           <div class="unit"><span>USD</span><input id="fob" type="number" min="0" step="any" value="2500"></div></div>
         <div class="f"><label for="units">Unidades</label>
           <input id="units" type="number" min="1" step="1" value="100"></div>
+        <div class="f"><label for="pu">Peso por unidad (opcional)</label><div class="unit"><span>kg</span><input id="pu" type="number" min="0" step="any" placeholder="Si lo sabés"></div></div>
       </div>
     </section>
 
@@ -134,6 +135,7 @@
       <div class="seg" role="radiogroup" aria-label="Cómo cotizás el flete">
         <input type="radio" name="fmode" id="fm-kilo" value="kilo" checked><label for="fm-kilo">Por kilo</label>
         <input type="radio" name="fmode" id="fm-total" value="total"><label for="fm-total">Total del envío</label>
+        <input type="radio" name="fmode" id="fm-m3" value="m3"><label for="fm-m3">Por m³ (marítimo)</label>
       </div>
       <div id="fleteKilo" class="grid2">
         <div class="f"><label for="fkilo">Tarifa por kilo</label>
@@ -143,9 +145,13 @@
       </div>
       <div id="fleteTotal" class="f" style="display:none"><label for="ftotal">Flete total del envío</label>
         <div class="unit"><span>USD</span><input id="ftotal" type="number" min="0" step="any" value="420"></div></div>
+      <div id="fleteM3" class="f" style="display:none"><label for="fm3">Tarifa por m³ (valor de ejemplo, pedí cotización)</label>
+        <div class="unit"><span>USD</span><input id="fm3" type="number" min="0" step="any" value="120"></div>
+        <p class="hint" style="margin-top:6px">Carga marítima: se cobra el mayor entre los m³ y las toneladas. Cargá abajo las medidas del bulto.</p></div>
 
       <p class="sub">Peso volumétrico: se cobra el mayor entre el peso real y el volumétrico.</p>
       <div class="grid2">
+        <div class="f"><label for="upc">Unidades por bulto (opcional)</label><input id="upc" type="number" min="0" step="1" value="0"></div>
         <div class="f"><label for="bultos">Cantidad de bultos</label><input id="bultos" type="number" min="0" step="1" value="0"></div>
         <div class="f"><label for="div">Divisor volumétrico</label><input id="div" type="number" min="1" step="any" value="5000"></div>
         <div class="f"><label for="l">Largo por bulto</label><div class="unit"><span>cm</span><input id="l" type="number" min="0" step="any" value="0"></div></div>
@@ -228,16 +234,17 @@ function calc(){
   const fmode = document.querySelector('input[name="fmode"]:checked').value;
   $("fleteKilo").style.display = fmode==="kilo" ? "grid" : "none";
   $("fleteTotal").style.display = fmode==="total" ? "block" : "none";
+  $("fleteM3").style.display = fmode==="m3" ? "block" : "none";
 
   const fob = n("fob"), units = Math.max(n("units"),1), fx = n("fx");
   const real = n("peso");
-  const vol = n("bultos") * n("l") * n("a") * n("h") / Math.max(n("div"),1);
+  const upc = n("upc"), bultos = upc>0 ? Math.ceil(units/upc) : n("bultos");
+  const m3 = bultos * n("l") * n("a") * n("h") / 1e6;
+  const vol = bultos * n("l") * n("a") * n("h") / Math.max(n("div"),1);
   const fact = Math.max(real, vol);
-  $("pesoInfo").textContent = vol>0
-    ? `Peso real ${dec(real)} kg · volumétrico ${dec(vol)} kg · facturable ${dec(fact)} kg`
-    : "Sin medidas cargadas: se usa el peso real.";
+  $("pesoInfo").textContent = (vol>0 ? `Peso real ${dec(real)} kg · volumétrico ${dec(vol)} kg · facturable ${dec(fact)} kg` : "Sin medidas cargadas: se usa el peso real.") + (m3>0 ? ` · ${dec(bultos,0)} bultos · ${dec(m3)} m³` : (fmode==="m3" ? " · Cargá las medidas del bulto para calcular los m³." : ""));
 
-  const flete = fmode==="kilo" ? n("fkilo")*fact : n("ftotal");
+  const flete = fmode==="kilo" ? n("fkilo")*fact : fmode==="m3" ? n("fm3")*Math.max(m3, real/1000) : n("ftotal");
   const seguro = fob * n("seg")/100;
   const cif = fob + flete + seguro;
 
@@ -326,6 +333,7 @@ $("units").addEventListener("input", () => {
 });
 $("fob").addEventListener("input", () => { autoFob = null; });
 $("peso").addEventListener("input", () => { autoPeso = null; });
+$("pu").addEventListener("input", () => { const v = n("pu"); autoPeso = v>0 ? v : null; if (autoPeso) $("peso").value = (v * Math.max(n("units"),1)).toFixed(1); calc(); });
 
 async function analizar(conTexto){
   const url = $("lkUrl").value.trim(), msg = $("lkMsg"), btn = $("lkBtn"), btn2 = $("lkTextBtn");
@@ -374,10 +382,11 @@ function aplicar(p){
   if (p.pedido_minimo) info.push("Pedido mínimo: " + dec(p.pedido_minimo,0) + " u.");
   if (p.pedido_minimo && units < p.pedido_minimo) info.push("Tus unidades están por debajo del mínimo");
   autoPeso = p.peso_kg_unidad > 0 ? p.peso_kg_unidad : null;
+  $("pu").value = autoPeso || "";
   if (autoPeso){
     $("peso").value = (autoPeso * units).toFixed(1);
     info.push("Peso: " + dec(autoPeso) + " kg por unidad, " + dec(autoPeso * units, 0) + " kg en total");
-  }
+  } else { info.push("La ficha no informa el peso: cargalo en Mercadería."); }
   $("prodInfo").textContent = info.join(" · ");
   msg.textContent = "Listo. El FOB" + (autoPeso ? " y el peso se recalculan" : " se recalcula") + " si cambiás las unidades. Verificá el precio en la página original." + (p.aviso ? " Ojo: " + p.aviso : "");
   if (p.aviso) msg.className = "lkmsg err";
