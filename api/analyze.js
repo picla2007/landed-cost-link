@@ -276,10 +276,14 @@ function fallbackParse(raw) {
     const lines = raw.split(/\r?\n/).map(function (l) { return l.trim(); });
     let stop = lines.findIndex(function (l) { return /^(?:US\s?\$|USD|\$)\s?\d/.test(l); });
     if (stop === -1) stop = lines.length;
-    lines.slice(0, stop).forEach(function (l) {
-      if (l.length >= 20 && l.length <= 200 && l.indexOf("](") === -1 && l.indexOf("http") === -1 &&
-          !/^[*\d]/.test(l) && (!titulo || l.length > titulo.length)) titulo = l;
-    });
+    const NO_TITULO = /^(?:no reviews|\d+(?:\.\d+)?\s*\/\s*5|store rating|main markets|response time|on-time|reorder|supplier|custom|minor|drawing|sample|full custom|verified|gold|select|photos|video|next slide|guardar|copiar|generador|id del|buscar|sell on|help center|about alibaba|deliver to|what are you)/i;
+    for (let i = stop - 1; i >= 0; i--) {
+      const l = lines[i];
+      if (l.length < 25 || l.length > 220) continue;
+      if (l.indexOf("](") !== -1 || l.indexOf("http") !== -1 || /^[*\d#]/.test(l) || NO_TITULO.test(l)) continue;
+      titulo = l;
+      break;
+    }
   }
   return { tiers: tiers, peso: peso, titulo: titulo };
 }
@@ -430,7 +434,8 @@ async function handler(req, res) {
       precios_escalonados: tiers,
       pedido_minimo: ai && ai.pedido_minimo != null ? parseNum(ai.pedido_minimo) : (tiers.length && tiers[0].desde > 1 ? tiers[0].desde : null),
       categoria: (ai && ai.categoria) || null,
-      peso_kg_unidad: fb.peso != null ? fb.peso : (ai && ai.peso_kg_unidad != null ? parseNum(ai.peso_kg_unidad) : null)
+      peso_kg_unidad: fb.peso != null ? fb.peso : (ai && ai.peso_kg_unidad != null ? parseNum(ai.peso_kg_unidad) : null),
+      aviso: ai ? null : motivoMensaje(respuesta.motivo)
     }
   });
 }
