@@ -172,7 +172,7 @@ function pageText(html) {
 // ---------- Lectura con IA ----------
 async function askClaude(datos, texto, url) {
   const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return null;
+  if (!key) return { ai: null, motivo: "sin_clave" };
   const prompt =
     "URL: " + url + "\n" +
     "Datos estructurados detectados: " + JSON.stringify(datos) + "\n\n" +
@@ -196,7 +196,7 @@ async function askClaude(datos, texto, url) {
       signal: ctrl.signal,
       headers: {
         "content-type": "application/json",
-        "x-api-key": key,
+        "x-api-key": key.trim(),
         "anthropic-version": "2023-06-01"
       },
       body: JSON.stringify({
@@ -206,19 +206,69 @@ async function askClaude(datos, texto, url) {
         messages: [{ role: "user", content: prompt }]
       })
     });
-    if (!r.ok) return null;
+    if (!r.ok) {
+      let t = "";
+      try { t = (await r.text()).slice(0, 300); } catch (e) { /* sin cuerpo */ }
+      console.error("Anthropic API error", r.status, t);
+      return { ai: null, motivo: "http_" + r.status };
+    }
     const data = await r.json();
     let txt = "";
     (data.content || []).forEach(function (b) { if (b.type === "text") txt += b.text; });
-    const a = txt.indexOf("{");
-    const b = txt.lastIndexOf("}");
-    if (a === -1 || b === -1) return null;
-    return JSON.parse(txt.slice(a, b + 1));
+    const i = txt.indexOf("{");
+    const j = txt.lastIndexOf("}");
+    if (i === -1 || j === -1) return { ai: null, motivo: "sin_json" };
+    return { ai: JSON.parse(txt.slice(i, j + 1)), motivo: null };
   } catch (e) {
-    return null;
+    console.error("askClaude falló:", e && e.message);
+    return { ai: null, motivo: "error" };
   } finally {
     clearTimeout(timer);
   }
+}
+
+// ---------- Lectura sin IA: escalones de precio, peso y título ----------
+function fallbackParse(raw) {
+  const flat = raw.replace(/\s+/g, " ");
+  const re = /(?:US\s?\$|USD|\$)\s?(\d[\d.,]*)\s*(?:[\/·|,]\s*)?(?:(?:≥|>=|>)\s?(\d[\d,]*)|(\d[\d,]*)\s?(?:-|–|to)\s?(\d[\d,]*))\s*(?:pieces?|piezas?|pcs|units?|unidades?|sets?|pairs?|bags?|lots?)/gi;
+  const seen = {};
+  const tiers = [];
+  let m;
+  while ((m = re.exec(flat)) !== null) {
+    const precio = parseNum(m[1]);
+    const desde = parseNum(m[2] != null ? m[2] : m[3]);
+    if (precio != null && desde != null && !seen[desde]) {
+      seen[desde] = true;
+      tiers.push({ desde: desde, precio: precio });
+    }
+  }
+  tiers.sort(function (x, y) { return x.desde - y.desde; });
+
+  let peso = null;
+  const w = flat.match(/(?:Gross Weight|Peso bruto)\s*:?\s*([\d.,]+)\s*kg/i) ||
+    flat.match(/(?:Net Weight|Peso neto)\s*:?\s*([\d.,]+)\s*kg/i);
+  if (w) peso = parseNum(w[1]);
+
+  let titulo = null;
+  if (raw.indexOf("\n") !== -1) {
+    const lines = raw.split(/\r?\n/).map(function (l) { return l.trim(); });
+    let stop = lines.findIndex(function (l) { return /^(?:US\s?\$|USD|\$)\s?\d/.test(l); });
+    if (stop === -1) stop = lines.length;
+    lines.slice(0, stop).forEach(function (l) {
+      if (l.length >= 20 && l.length <= 200 && l.indexOf("](") === -1 && l.indexOf("http") === -1 &&
+          !/^[*\d]/.test(l) && (!titulo || l.length > titulo.length)) titulo = l;
+    });
+  }
+  return { tiers: tiers, peso: peso, titulo: titulo };
+}
+
+function motivoMensaje(m) {
+  if (m === "sin_clave") return "Falta la clave de la IA: agregá ANTHROPIC_API_KEY en Vercel (Settings → Environment Variables) y hacé un Redeploy.";
+  if (m === "http_401") return "La clave ANTHROPIC_API_KEY no es válida. Revisá que esté bien copiada, sin espacios ni comillas.";
+  if (m === "http_404") return "El modelo configurado no existe. Borrá la variable ANALYZE_MODEL en Vercel o poné un modelo válido.";
+  if (m === "http_429" || m === "http_529") return "La API de Anthropic está saturada o llegaste al límite. Probá de nuevo en un rato.";
+  if (m && m.indexOf("http_") === 0) return "La API de Anthropic respondió con error " + m.slice(5) + ". Revisá la clave y el saldo de tu cuenta.";
+  return "No pude identificar el precio en el texto. Asegurate de copiar la parte con los precios, o cargalo a mano.";
 }
 
 // ---------- Scraper opcional (para plataformas que bloquean, ej. Alibaba) ----------
@@ -269,82 +319,7 @@ async function handler(req, res) {
   if (typeof body === "string") { try { body = JSON.parse(body); } catch (e) { body = {}; } }
   body = body || {};
   const url = typeof body.url === "string" ? body.url.trim() : "";
-  const pegado = typeof body.texto === "string" ? body.texto.replace(/\s+/g, " ").trim() : "";
+  const pegadoRaw = typeof body.texto === "string" ? body.texto.slice(0, 60000) : "";
+  const pegado = pegadoRaw.replace(/\s+/g, " ").trim();
 
-  let datos = { titulo: null, precio: null, moneda: null, imagen: null };
-  let texto = "";
-  let finalUrl = url;
-
-  if (pegado.length >= 50) {
-    // Modo texto pegado: no se descarga nada, no hay bloqueo posible
-    texto = pegado.slice(0, 60000);
-  } else {
-    try { new URL(url); } catch (e) {
-      return res.status(400).json({ ok: false, mensaje: "El link no es válido." });
-    }
-    let page;
-    try {
-      page = await fetchPage(url);
-    } catch (e) {
-      page = null;
-    }
-    if (page && page.status === 404) {
-      return res.status(200).json({ ok: false, mensaje: "Ese link no existe o la publicación fue eliminada." });
-    }
-    let r = page ? leer(page) : { bloqueada: true };
-    if (r.bloqueada) {
-      const via = await fetchViaScraper(url);
-      if (via) { page = via; r = leer(via); }
-    }
-    if (r.bloqueada || !page) {
-      return res.status(200).json({
-        ok: false,
-        sugerirTexto: true,
-        mensaje: "Esta plataforma bloquea la lectura automática. Pegá abajo el texto de la página y lo analizo igual."
-      });
-    }
-    datos = r.datos;
-    texto = r.texto;
-    finalUrl = page.finalUrl;
-  }
-
-  const ai = await askClaude(datos, texto, finalUrl || "(texto pegado)");
-  const precio = (ai && ai.precio_unitario != null ? parseNum(ai.precio_unitario) : null) || datos.precio;
-  if (precio == null) {
-    return res.status(200).json({
-      ok: false,
-      sugerirTexto: true,
-      mensaje: "No pude identificar el precio. Si pegaste el texto, asegurate de copiar toda la página del producto. Si no, cargalo a mano."
-    });
-  }
-
-  const tiers = ai && Array.isArray(ai.precios_escalonados)
-    ? ai.precios_escalonados
-        .map(function (t) { return { desde: parseNum(t.desde), precio: parseNum(t.precio) }; })
-        .filter(function (t) { return t.desde != null && t.precio != null; })
-        .sort(function (a, b) { return a.desde - b.desde; })
-    : [];
-
-  let plataforma = "texto pegado";
-  try { plataforma = new URL(finalUrl).hostname.replace(/^www\./, ""); } catch (e) { /* sin url */ }
-
-  return res.status(200).json({
-    ok: true,
-    fuente: ai ? "ia" : "estructurado",
-    producto: {
-      plataforma: plataforma,
-      titulo: (ai && ai.titulo) || datos.titulo || "Producto sin título",
-      imagen: datos.imagen || null,
-      precio_unitario: precio,
-      moneda: ((ai && ai.moneda) || datos.moneda || "USD").toUpperCase(),
-      precios_escalonados: tiers,
-      pedido_minimo: ai && ai.pedido_minimo != null ? parseNum(ai.pedido_minimo) : null,
-      categoria: (ai && ai.categoria) || null,
-      peso_kg_unidad: ai && ai.peso_kg_unidad != null ? parseNum(ai.peso_kg_unidad) : null
-    }
-  });
-}
-
-module.exports = handler;
-module.exports._test = { extractStructured: extractStructured, parseNum: parseNum, assertPublic: assertPublic, pageText: pageText };
-
+  let datos = { titulo: null, precio: null, moneda: null, imagen: n
