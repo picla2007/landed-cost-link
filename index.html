@@ -338,7 +338,7 @@ async function analizar(conTexto){
     const r = await fetch("/api/analyze", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({url, texto})});
     const d = await r.json();
     if (!d.ok){
-      msg.textContent = d.mensaje || "No pude leer ese link. Cargá el precio a mano."; msg.className = "lkmsg err";
+      msg.textContent = (d.mensaje || "No pude leer ese link. Cargá el precio a mano.") + (d.detalle ? " (" + d.detalle + ")" : ""); msg.className = "lkmsg err";
       if (d.sugerirTexto) $("paste").style.display = "block";
       return;
     }
