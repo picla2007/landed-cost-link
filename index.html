@@ -152,6 +152,7 @@
         <div class="f"><label for="a">Ancho por bulto</label><div class="unit"><span>cm</span><input id="a" type="number" min="0" step="any" value="0"></div></div>
         <div class="f"><label for="h">Alto por bulto</label><div class="unit"><span>cm</span><input id="h" type="number" min="0" step="any" value="0"></div></div>
         <div class="f"><label for="seg">Seguro sobre FOB</label><div class="unit pct"><span>%</span><input id="seg" type="number" min="0" step="any" value="0"></div></div>
+        <p class="hint" style="grid-column:1/-1;margin:-4px 0 4px">Si no acreditás seguro, Aduana puede presumir un 1% del FOB para armar el CIF. Confirmalo con tu despachante y cargalo acá si corresponde.</p>
       </div>
       <p class="hint" id="pesoInfo"></p>
     </section>
@@ -176,15 +177,21 @@
           <select id="pgan"><option value="6">6% inscripto</option><option value="11">11% no inscripto</option><option value="0">Sin percepción</option></select></div>
         <div class="f"><label for="iibb">Percepción IIBB</label><div class="unit pct"><span>%</span><input id="iibb" type="number" min="0" step="any" value="0"></div></div>
       </div>
-      <label class="check"><input type="checkbox" id="ri" checked><span>Soy responsable inscripto: recupero IVA y percepciones como crédito fiscal. Si lo destildás, se suman al costo.</span></label>
+      <div class="f"><label for="cf">Tu condición fiscal</label><select id="cf"><option value="ri">Responsable Inscripto: recuperás IVA y percepciones</option><option value="mono">Monotributo: IVA y percepciones son costo</option></select></div>
       <p class="hint">Las alícuotas son valores de referencia y cambian por normativa y por posición arancelaria. Confirmalas con tu despachante o con el courier antes de comprar.</p>
     </section>
 
     <section class="card">
-      <h2><span class="step">4</span>Gastos locales y venta</h2>
+      <h2><span class="step">4</span>Gastos en Argentina y precio de venta</h2>
       <div class="grid2">
-        <div class="f"><label for="gl">Despachante, courier y flete interno</label><div class="unit"><span>USD</span><input id="gl" type="number" min="0" step="any" value="0"></div></div>
-        <div class="f"><label for="mg">Margen deseado sobre precio de venta</label><div class="unit pct"><span>%</span><input id="mg" type="number" min="0" max="95" step="any" value="40"></div></div>
+        <div class="f"><label for="dsp">Despachante (sobre CIF)</label><div class="unit pct"><span>%</span><input id="dsp" type="number" min="0" step="any" value="0"></div></div>
+        <div class="f"><label for="dmin">Honorario mínimo del despachante</label><div class="unit"><span>USD</span><input id="dmin" type="number" min="0" step="any" value="0"></div></div>
+        <div class="f"><label for="term">Terminal y depósito</label><div class="unit"><span>USD</span><input id="term" type="number" min="0" step="any" value="0"></div></div>
+        <div class="f"><label for="fint">Flete hasta tu depósito</label><div class="unit"><span>USD</span><input id="fint" type="number" min="0" step="any" value="0"></div></div>
+        <div class="f"><label for="otr">Otros (banco, certificaciones)</label><div class="unit"><span>USD</span><input id="otr" type="number" min="0" step="any" value="0"></div></div>
+        <p class="hint" style="grid-column:1/-1;margin:-4px 0 4px">El despachante cobra el mayor entre el porcentaje y el mínimo. Cargá tu cotización sin IVA: lo que dejes en 0 no suma costo.</p>
+        <div class="f"><label for="pm">Cómo fijás el precio</label><select id="pm"><option value="margen">Margen sobre precio de venta</option><option value="markup">Markup sobre el costo</option></select></div>
+        <div class="f"><label for="mg">Porcentaje</label><div class="unit pct"><span>%</span><input id="mg" type="number" min="0" step="any" value="40"></div></div>
         <div class="f"><label for="fx">Dólar (ARS por USD)</label><div class="unit"><span>ARS</span><input id="fx" type="number" min="0" step="any" value="1400"></div></div>
         <div class="f"><label>&nbsp;</label><button class="btn" id="fxBtn" type="button">Traer dólar oficial</button><p class="sub" id="fxMsg" style="margin-top:6px"></p></div>
       </div>
@@ -201,6 +208,8 @@
         <div class="unitcost">
           <div><small>Landed cost por unidad</small><b id="luUSD">—</b><small id="luARS"></small></div>
           <div><small>Precio de venta sugerido</small><b id="pvUSD">—</b><small id="pvARS"></small></div>
+          <div><small>Precio final al público</small><b id="pfUSD">—</b><small id="pfARS"></small></div>
+          <div><small>Ganancia por unidad</small><b id="gnUSD">—</b><small id="gnARS"></small></div>
         </div>
       </div>
       <table>
@@ -248,16 +257,20 @@ function calc(){
   const piva = base * parseFloat($("piva").value)/100;
   const pgan = base * parseFloat($("pgan").value)/100;
   const iibb = base * n("iibb")/100;
-  const gl = n("gl");
+  const dsp = Math.max(cif * n("dsp")/100, n("dmin"));
+  const otros = n("term") + n("fint") + n("otr");
+  const gl = dsp + otros;
 
   const recup = iva + piva + pgan + iibb;
-  const ri = $("ri").checked;
+  const ri = $("cf").value === "ri";
   const landed = cif + dd + te + gl + (ri ? 0 : recup);
   const desembolso = cif + dd + te + recup + gl;
   const lu = landed/units;
   const factor = fob>0 ? landed/fob : 0;
-  const mg = Math.min(n("mg"),95)/100;
-  const pv = lu/(1-mg);
+  const pct = n("mg");
+  const pv = $("pm").value === "markup" ? lu*(1+pct/100) : lu/(1-Math.min(pct,95)/100);
+  const pf = ri ? pv*(1+parseFloat($("iva").value)/100) : pv;
+  const gan = pv - lu;
 
   // Avisos de régimen
   const al = $("alertReg"); const msgs = [];
@@ -272,6 +285,8 @@ function calc(){
   $("heroTxt").textContent = fob>0 ? `Un ${dec((factor-1)*100,0)}% por encima del valor FOB${ri ? ", sin contar lo que recuperás de impuestos" : ""}.` : "Cargá el valor FOB para empezar.";
   $("luUSD").textContent = usd(lu); $("luARS").textContent = fx ? ars(lu*fx) : "";
   $("pvUSD").textContent = usd(pv); $("pvARS").textContent = fx ? ars(pv*fx) : "";
+  $("pfUSD").textContent = usd(pf); $("pfARS").textContent = fx ? ars(pf*fx) : "";
+  $("gnUSD").textContent = usd(gan); $("gnARS").textContent = "Lote: " + usd(gan*units) + (fx ? " · " + ars(gan*units*fx) : "");
   $("barVal").textContent = usd(lu);
 
   const row = (l,v,cls="") => `<tr class="${cls}"><td>${l}</td><td>${usd(v)}</td><td>${fx?ars(v*fx):""}</td></tr>`;
@@ -282,14 +297,15 @@ function calc(){
   h += row("Valor CIF",cif,"tot");
   h += row(`Derechos de importación (${dec(n("dd"),1)}%)`,dd);
   if (te) h += row(`Tasa de estadística (${dec(n("te"),1)}%)`,te);
-  if (gl) h += row("Gastos locales",gl);
+  if (dsp) h += row("Despachante",dsp);
+  if (otros) h += row("Terminal, flete local y otros",otros);
   h += row(ri ? "Costo no recuperable" : "Costo sin crédito fiscal", cif+dd+te+gl, "tot");
   h += row(`IVA (${$("iva").value}%)`,iva,ri?"rec":"");
   if (piva) h += row(`Percepción IVA (${$("piva").value}%)`,piva,ri?"rec":"");
   if (pgan) h += row(`Percepción Ganancias (${$("pgan").value}%)`,pgan,ri?"rec":"");
   if (iibb) h += row(`Percepción IIBB (${dec(n("iibb"),1)}%)`,iibb,ri?"rec":"");
   h += row(ri ? "Recuperable como crédito fiscal" : "Impuestos sumados al costo", recup, "tot");
-  h += row("Desembolso total",desembolso);
+  h += row("Desembolso total (plata que ponés)",desembolso);
   h += row("Landed cost del lote",landed,"big");
   $("rows").innerHTML = h;
 }
