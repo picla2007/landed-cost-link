@@ -159,6 +159,11 @@
 
     <section class="card">
       <h2><span class="step">3</span>Régimen y tributos</h2>
+      <div class="f"><label for="pos">Posición arancelaria guardada</label>
+        <select id="pos"><option value="">Elegí una guardada…</option></select>
+        <div class="lk" style="margin-top:8px"><input id="posNom" type="text" placeholder="Nombre (ej. Inflables 9503)" aria-label="Nombre de la posición"><button class="go" id="posSave" type="button">Guardar</button></div>
+        <button class="btn" id="posDel" type="button" style="margin-top:8px">Borrar la elegida</button>
+        <p class="hint" style="margin:6px 0 0">Guarda el nombre con el derecho, la tasa y el IVA que cargaste abajo. Quedan en este navegador.</p></div>
       <div class="f"><label for="reg">Tipo de envío</label>
         <select id="reg">
           <option value="courier">Courier comercial</option>
@@ -205,6 +210,7 @@
         <div class="k">Por cada USD 1 de mercadería pagás en total</div>
         <div class="factor" id="factor">—</div>
         <p id="heroTxt"></p>
+        <p id="pesadoMsg" style="display:none;background:rgba(242,183,5,.15);border:1px solid rgba(242,183,5,.5);color:var(--signal);border-radius:8px;padding:6px 10px;font-size:.85rem;margin-top:10px"></p>
         <div class="unitcost">
           <div><small>Landed cost por unidad</small><b id="luUSD">—</b><small id="luARS"></small></div>
           <div><small>Precio de venta sugerido</small><b id="pvUSD">—</b><small id="pvARS"></small></div>
@@ -288,6 +294,9 @@ function calc(){
   $("pfUSD").textContent = usd(pf); $("pfARS").textContent = fx ? ars(pf*fx) : "";
   $("gnUSD").textContent = usd(gan); $("gnARS").textContent = "Lote: " + usd(gan*units) + (fx ? " · " + ars(gan*units*fx) : "");
   $("barVal").textContent = usd(lu);
+  const alto = fob>0 && (factor>3 || flete>fob*0.5);
+  $("pesadoMsg").style.display = alto ? "block" : "none";
+  $("pesadoMsg").textContent = alto ? "Pesado: el flete es el " + dec(flete/fob*100,0) + "% del FOB y el costo final es ×" + dec(factor) + ". Revisalo antes de comprar." : "";
 
   const row = (l,v,cls="") => `<tr class="${cls}"><td>${l}</td><td>${usd(v)}</td><td>${fx?ars(v*fx):""}</td></tr>`;
   let h = "";
@@ -402,6 +411,33 @@ function aplicar(p){
 $("lkBtn").addEventListener("click", () => analizar(false));
 $("lkTextBtn").addEventListener("click", () => analizar(true));
 $("lkUrl").addEventListener("keydown", e => { if (e.key === "Enter") analizar(false); });
+
+// ---------- Posiciones arancelarias guardadas (en este navegador) ----------
+const POS_KEY = "lc_posiciones";
+function posLoad(){ try{ return JSON.parse(localStorage.getItem(POS_KEY) || "[]"); }catch(e){ return []; } }
+function posSave(l){ try{ localStorage.setItem(POS_KEY, JSON.stringify(l)); }catch(e){} }
+function posRender(sel){
+  const s = $("pos"); s.innerHTML = ""; s.add(new Option("Elegí una guardada…", ""));
+  posLoad().forEach((p,i) => s.add(new Option(p.n + " · " + p.dd + "% + " + p.te + "%", String(i))));
+  if (sel != null) s.value = String(sel);
+}
+$("pos").addEventListener("change", () => {
+  const p = posLoad()[$("pos").value]; if (!p) return;
+  $("dd").value = p.dd; $("te").value = p.te; $("iva").value = p.iva; calc();
+});
+$("posSave").addEventListener("click", () => {
+  const nom = $("posNom").value.trim(); if (!nom) return;
+  const l = posLoad(), p = {n:nom, dd:n("dd"), te:n("te"), iva:$("iva").value};
+  const i = l.findIndex(x => x.n === nom);
+  if (i >= 0) l[i] = p; else l.push(p);
+  posSave(l); posRender(i >= 0 ? i : l.length - 1); $("posNom").value = "";
+});
+$("posDel").addEventListener("click", () => {
+  const i = $("pos").value; if (i === "") return;
+  const l = posLoad(); l.splice(+i, 1); posSave(l); posRender();
+});
+posRender();
+$("fxBtn").click(); // dólar oficial automático al abrir
 
 calc();
 </script>
